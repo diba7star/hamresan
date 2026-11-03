@@ -1,0 +1,30 @@
+# ---- secrets: never commit
+keys/
+app/keystore.properties
+*.jks
+*.keystore
+server/config.php
+server-dir/config.php
+**/data/
+*-install.html
+
+# ---- build output
+app/build/
+app/app/build/
+app/.gradle/
+app/.kotlin/
+app/.idea/
+app/local.properties
+app/*.iml
+app/app/*.iml
+dist/
+releases/
+*.apk
+*.aab
+
+# ---- local junk
+.DS_Store
+Thumbs.db
+*.log
+php.err
+php.out
