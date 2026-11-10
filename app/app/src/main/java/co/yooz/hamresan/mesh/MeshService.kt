@@ -62,6 +62,7 @@ class MeshService : Service() {
     private val state get() = app.mesh
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var client: ConnectionsClient
+    private lateinit var calls: CallEngine
     private val sendLock = Mutex()
 
     /** endpointId -> what we believe the peer has (updated as we send). */
@@ -75,6 +76,8 @@ class MeshService : Service() {
     override fun onCreate() {
         super.onCreate()
         client = Nearby.getConnectionsClient(this)
+        calls = CallEngine(this, state, client, { app.prefs.pub }, { app.prefs.displayName() }, { ep, m -> send(ep, m) },
+            { pub -> state.peers.value.values.firstOrNull { it.pub == pub }?.endpointId })
         startForegroundCompat()
         state.setRunning(true)
         state.log("سرویس شبکه محلی شروع شد")
@@ -105,6 +108,30 @@ class MeshService : Service() {
                     MeshState.Command.ResyncAll -> state.peers.value.keys.forEach { sendHello(it) }
                     MeshState.Command.PttStart -> startPtt()
                     MeshState.Command.PttStop -> stopPtt()
+                    is MeshState.Command.CallStart -> calls.start(cmd.toPub, cmd.toName)
+                    is MeshState.Command.CallAccept -> calls.accept(cmd.id)
+                    is MeshState.Command.CallEnd -> calls.end(cmd.id)
+                    is MeshState.Command.CallMute -> calls.setMuted(cmd.muted)
+                    is MeshState.Command.CallSpeaker -> calls.setSpeaker(cmd.on)
+                }
+            }
+        }
+        // call timeouts: nobody answers / nobody picks up
+        scope.launch {
+            state.call.collect { c ->
+                when (c) {
+                    is MeshState.Call.Outgoing -> scope.launch {
+                        delay(40_000L)
+                        if (state.call.value === c) { state.notices.tryEmit("پاسخی نیامد؛ ${c.peerName} در دسترس نیست"); calls.end(c.id) }
+                    }
+                    is MeshState.Call.Ringing -> {
+                        showCallNotification(c.peerName)
+                        scope.launch {
+                            delay(45_000L)
+                            if (state.call.value === c) calls.end(c.id)
+                        }
+                    }
+                    else -> cancelCallNotification()
                 }
             }
         }
@@ -204,6 +231,8 @@ class MeshService : Service() {
             state.log("قطع شد: ${state.peer(endpointId)?.name}")
             state.removePeer(endpointId)
             peerHave.remove(endpointId); peerCommon.remove(endpointId)
+            state.forgetVia(endpointId)
+            scope.launch { calls.onPeerLost(endpointId) }
             updateNotification()
         }
     }
@@ -222,6 +251,7 @@ class MeshService : Service() {
                             val head = ByteArray(4); var got = 0
                             while (got < 4) { val n = input.read(head, got, 4 - got); if (n < 0) break; got += n }
                             if (got == 4 && String(head) == PTT_MAGIC) { playLive(endpointId, input); return@launch }
+                            if (got == 4 && String(head) == CallEngine.MAGIC) { calls.onStream(endpointId, input); return@launch }
                             val buf = ByteArrayOutputStream()
                             buf.write(head, 0, got)
                             val tmp = ByteArray(16 * 1024)
@@ -258,8 +288,12 @@ class MeshService : Service() {
             val p = app.prefs
             val cs = JSONArray()
             p.communities.value.forEach { cs.put(JSONObject().put("id", it.id).put("name", it.name).put("apub", it.adminPub)) }
+            // our direct neighbours, so the peer knows who it can reach (call) through us
+            val nb = JSONArray()
+            state.peers.value.values.filter { it.endpointId != endpointId && it.pub.isNotBlank() }.take(30)
+                .forEach { nb.put(JSONObject().put("pub", it.pub).put("name", it.name)) }
             val msg = JSONObject().put("m", "hello").put("pub", p.pub).put("name", p.displayName())
-                .put("cs", cs).put("have", Wire.haveToJson(app.repo.have()))
+                .put("cs", cs).put("nb", nb).put("have", Wire.haveToJson(app.repo.have()))
             p.cert.value?.let { msg.put("cert", it.toJson()) }
             send(endpointId, msg)
         }
@@ -271,6 +305,7 @@ class MeshService : Service() {
             "hello" -> onHello(endpointId, msg)
             "items" -> onItems(endpointId, msg)
             "cert" -> onCert(endpointId, msg)
+            "call" -> calls.onMessage(endpointId, msg)
         }
     }
 
@@ -301,17 +336,30 @@ class MeshService : Service() {
             if (apub.isBlank() || now.isBlank() || apub == now) common.add(id)
             else state.log("کلید محله «$id» همسایه با شما فرق دارد؛ این محله رد و بدل نمی‌شود")
         }
-        if (common.isEmpty()) {
-            state.log("همسایه محله مشترکی با شما ندارد")
-            drop(endpointId)
-            return
-        }
-        peerCommon[endpointId] = common
-
         val cert = WriterCert.fromJson(msg.optJSONObject("cert"))?.takeIf { it.pub == pub }
         val certCommunity = cert?.let { c -> app.prefs.adminPubs().entries.firstOrNull { c.isValidAt(System.currentTimeMillis(), it.value) }?.key }
         val name = (if (certCommunity != null) cert.name else msg.optString("name")).take(40)
         state.updatePeer(endpointId) { it.copy(name = name.ifBlank { it.name }, pub = pub, isWriter = certCommunity != null) }
+
+        // who can we reach through this neighbour (for relayed calls)
+        val nb = msg.optJSONArray("nb")
+        if (nb != null) {
+            val direct = state.peers.value.values.map { it.pub }.toSet()
+            val list = (0 until nb.length()).mapNotNull { i ->
+                val o = nb.optJSONObject(i) ?: return@mapNotNull null
+                val p2 = o.optString("pub")
+                if (p2.isBlank() || p2 == app.prefs.pub || p2 in direct) null
+                else MeshState.Reachable(p2, o.optString("name").take(40), endpointId, name)
+            }
+            state.setReachableVia(endpointId, list)
+        }
+
+        // No shared community: stay connected (calls, walkie-talkie and relaying still work) but exchange no posts.
+        peerCommon[endpointId] = common
+        if (common.isEmpty()) {
+            state.log("$name محله مشترکی ندارد؛ فقط تماس و بی‌سیم")
+            return
+        }
         if (pub.isNotBlank()) {
             val existing = app.db.authors().byPub(pub)
             if (existing == null || (certCommunity != null && existing.cert.isBlank())) {
@@ -500,6 +548,31 @@ class MeshService : Service() {
             .build()
     }
 
+    /** Incoming call: a high-priority notification that opens the app (full-screen on a locked phone). */
+    private fun showCallNotification(from: String) {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= 26) {
+            nm.createNotificationChannel(NotificationChannel(CALL_CHANNEL, "تماس‌های همرسان", NotificationManager.IMPORTANCE_HIGH))
+        }
+        val open = PendingIntent.getActivity(this, 1, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val n = NotificationCompat.Builder(this, CALL_CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_mesh)
+            .setContentTitle("📞 تماس از $from")
+            .setContentText("برای پاسخ، برنامه را باز کنید")
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setContentIntent(open)
+            .setFullScreenIntent(open, true)
+            .setAutoCancel(true)
+            .build()
+        try { nm.notify(CALL_NOTIF_ID, n) } catch (_: SecurityException) {}
+    }
+
+    private fun cancelCallNotification() {
+        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(CALL_NOTIF_ID)
+    }
+
     private fun updateNotification() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(NOTIF_ID, buildNotification())
@@ -512,6 +585,8 @@ class MeshService : Service() {
         private const val NOTIF_ID = 1
         const val ACTION_STOP = "co.yooz.hamresan.STOP"
         const val PTT_MAGIC = "PTT1"
+        private const val CALL_CHANNEL = "calls"
+        private const val CALL_NOTIF_ID = 2
         const val PTT_RATE = 16000
 
         fun start(ctx: Context) {

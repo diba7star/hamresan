@@ -46,7 +46,34 @@ class MeshState {
         object ResyncAll : Command()
         object PttStart : Command()
         object PttStop : Command()
+        data class CallStart(val toPub: String, val toName: String) : Command()
+        data class CallAccept(val id: String) : Command()
+        data class CallEnd(val id: String) : Command()
+        data class CallMute(val muted: Boolean) : Command()
+        data class CallSpeaker(val on: Boolean) : Command()
     }
+
+    /** People reachable through a neighbour (2 hops), learned from neighbours' hellos. Callable via relay. */
+    data class Reachable(val pub: String, val name: String, val viaEndpoint: String, val viaName: String)
+    private val _reachable = MutableStateFlow<Map<String, Reachable>>(emptyMap())
+    val reachable: StateFlow<Map<String, Reachable>> = _reachable
+    fun setReachableVia(endpointId: String, list: List<Reachable>) {
+        _reachable.value = _reachable.value.filterValues { it.viaEndpoint != endpointId } + list.associateBy { it.pub }
+    }
+    fun forgetVia(endpointId: String) { _reachable.value = _reachable.value.filterValues { it.viaEndpoint != endpointId } }
+
+    /** Voice call state (one call at a time). */
+    sealed class Call(val id: String, val peerName: String, val hops: Int) {
+        class Outgoing(id: String, peerName: String) : Call(id, peerName, 0)
+        class Ringing(id: String, peerName: String, hops: Int) : Call(id, peerName, hops)
+        class Active(id: String, peerName: String, hops: Int, val since: Long = System.currentTimeMillis()) : Call(id, peerName, hops)
+    }
+    private val _call = MutableStateFlow<Call?>(null)
+    val call: StateFlow<Call?> = _call
+    fun setCall(c: Call?) { _call.value = c }
+    private val _speaker = MutableStateFlow(false)
+    val speaker: StateFlow<Boolean> = _speaker
+    fun setSpeaker(v: Boolean) { _speaker.value = v }
 
     /** Live push-to-talk state. */
     private val _pttTalking = MutableStateFlow(false)

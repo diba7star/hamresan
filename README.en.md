@@ -36,6 +36,7 @@ Host requirements: PHP 7.2+ with `pdo_sqlite`, `mbstring`, `curl`. The sodium ex
 
 - **Voice notes:** writers can publish a voice post (up to 60 s) instead of a photo; anyone can leave a voice reply under a post (hold the mic next to the comment box). Notes are small AAC files (~15 KB per 10 s), signed and gossiped like any item.
 - **Live walkie-talkie:** on the *Neighbours* tab, hold the big button to talk live to every connected neighbour (30–80 m). One hop, no internet.
+- **Two-way voice calls:** call any connected neighbour from the *Neighbours* tab; people reachable through a neighbour are listed too and the call is relayed by intermediate phones (up to 3 hops). Ringing, accept/decline, mute, speaker and an incoming-call notification. Each hop adds a little latency; the call drops if a relay phone moves away.
 
 ## Fully offline communities
 

@@ -20,8 +20,8 @@ android {
         applicationId = "co.yooz.hamresan"
         minSdk = 24
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.5.0"
+        versionCode = 7
+        versionName = "1.6.0"
         // Default center (directory of communities), as a center ID "host/path". Users can add their own centers.
         buildConfigField("String", "DEFAULT_CENTER", "\"hhi1.ir/hamresan-dir\"")
     }

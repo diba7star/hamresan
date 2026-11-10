@@ -193,6 +193,7 @@ fun Root(
             }
         }
     }
+    CallOverlay()
 }
 
 @Composable
@@ -875,9 +876,11 @@ fun ActivityScreen(
                         Text("دریافت ${p.received.fa()} · ارسال ${p.sent.fa()}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (adminCommunity != null && !p.isWriter) TextButton(onClick = { app.mesh.commands.tryEmit(MeshState.Command.GrantWriter(p.endpointId)) }) { Text("نویسنده کن") }
+                    if (p.pub.isNotBlank()) CallButton(p.pub, p.name)
                 }
             }
         }
+        ReachableSection()
         Section("گزارش") {
             if (log.isEmpty()) Text("—", color = MaterialTheme.colorScheme.onSurfaceVariant)
             log.take(30).forEach { Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
