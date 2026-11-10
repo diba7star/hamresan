@@ -1,6 +1,5 @@
 package co.yooz.hamresan.net
 
-import co.yooz.hamresan.BuildConfig
 import co.yooz.hamresan.data.Prefs
 import co.yooz.hamresan.data.Repo
 import co.yooz.hamresan.data.Wire
@@ -14,25 +13,39 @@ import java.net.URLEncoder
 
 /**
  * Network side, used only when the device happens to have internet.
- *  - directory: resolves a community ID to its admin public key (central, no server addresses stored)
- *  - login:     username/password on a community server -> admin-signed writer certificate
- *  - sync:      exchange have-vectors and missing items with the community server (the "courier" role)
+ *  - centers:  independent directories; each resolves community ID -> admin public key (no server addresses)
+ *  - login:    username/password on a community server -> admin-signed writer certificate
+ *  - sync:     exchange have-vectors and missing items with the community server (the "courier" role)
  */
 class ServerApi(private val prefs: Prefs, private val repo: Repo) {
 
     data class SyncResult(val received: Int, val sent: Int)
-    data class DirEntry(val id: String, val name: String, val pub: String)
+    data class DirEntry(val id: String, val name: String, val pub: String, val center: String)
+    data class CenterInfo(val id: String, val name: String, val communities: Int)
 
     class NoServer : Exception("server not set")
     class WrongCommunity(val id: String) : Exception("server belongs to another community")
 
-    // ---------------- directory ----------------
+    // ---------------- centers ----------------
 
-    /** Look a community up in the central directory. failure = could not reach; success(null) = not registered. */
-    suspend fun directoryLookup(id: String): Result<DirEntry?> = withContext(Dispatchers.IO) {
+    /** Probe a center by ID (host/path). Success = it is a Hamresan center. */
+    suspend fun probeCenter(centerId: String): Result<CenterInfo> = withContext(Dispatchers.IO) {
         try {
-            val res = get(BuildConfig.DIRECTORY_URL + "?id=" + URLEncoder.encode(id.trim().lowercase(), "UTF-8"))
-            if (res.optBoolean("ok")) Result.success(DirEntry(res.getString("id"), res.optString("name"), res.getString("pub")))
+            val c = Prefs.Center(Prefs.Center.normalizeId(centerId), "")
+            val res = get(c.url)
+            if (res.optString("service") != "hamresan-directory") return@withContext Result.failure(Exception("not a center"))
+            val info = res.optJSONObject("center")
+            Result.success(CenterInfo(c.id, info?.optString("name") ?: "", info?.optInt("communities") ?: 0))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /** Look a community up in one center. failure = could not reach; success(null) = not registered there. */
+    suspend fun directoryLookup(center: Prefs.Center, id: String): Result<DirEntry?> = withContext(Dispatchers.IO) {
+        try {
+            val res = get(center.url + "?id=" + URLEncoder.encode(id.trim().lowercase(), "UTF-8"))
+            if (res.optBoolean("ok")) Result.success(DirEntry(res.getString("id"), res.optString("name"), res.getString("pub"), center.id))
             else if (res.optString("error") == "not_found") Result.success(null)
             else Result.failure(Exception(res.optString("error", "directory error")))
         } catch (e: Exception) {
@@ -40,32 +53,42 @@ class ServerApi(private val prefs: Prefs, private val repo: Repo) {
         }
     }
 
-    /** Public catalogue of all registered communities (optionally filtered). failure = offline. */
-    suspend fun directoryList(query: String = ""): Result<List<DirEntry>> = withContext(Dispatchers.IO) {
+    /** Look an ID up in every configured center; first hit wins. */
+    suspend fun lookupAnywhere(id: String): Result<DirEntry?> {
+        var reachedAny = false
+        for (c in prefs.centers.value) {
+            val r = directoryLookup(c, id)
+            if (r.isSuccess) { reachedAny = true; r.getOrNull()?.let { return Result.success(it) } }
+        }
+        return if (reachedAny) Result.success(null) else Result.failure(Exception("offline"))
+    }
+
+    /** Public catalogue of one center (optionally filtered). failure = offline. */
+    suspend fun directoryList(center: Prefs.Center, query: String = ""): Result<List<DirEntry>> = withContext(Dispatchers.IO) {
         try {
-            val url = BuildConfig.DIRECTORY_URL + "?list=1" + (if (query.isBlank()) "" else "&q=" + URLEncoder.encode(query.trim(), "UTF-8"))
+            val url = center.url + "?list=1" + (if (query.isBlank()) "" else "&q=" + URLEncoder.encode(query.trim(), "UTF-8"))
             val res = get(url)
             if (!res.optBoolean("ok")) return@withContext Result.failure(Exception(res.optString("error", "directory error")))
             val arr = res.optJSONArray("items") ?: return@withContext Result.success(emptyList())
             Result.success((0 until arr.length()).mapNotNull { i ->
                 val o = arr.optJSONObject(i) ?: return@mapNotNull null
-                DirEntry(o.optString("id"), o.optString("name"), o.optString("pub"))
+                DirEntry(o.optString("id"), o.optString("name"), o.optString("pub"), center.id)
             })
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    /** Register a locally-created community in the directory (needs internet + the admin seed on this phone). */
-    suspend fun registerLocalCommunity(id: String): Result<Unit> = withContext(Dispatchers.IO) {
+    /** Register a locally-created community in a center (needs internet + the admin seed on this phone). */
+    suspend fun registerLocalCommunity(id: String, center: Prefs.Center): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val c = prefs.community(id) ?: return@withContext Result.failure(Exception("unknown community"))
             val ts = System.currentTimeMillis()
             val sig = repo.registrationSignature(c.id, c.adminPub, c.name, ts) ?: return@withContext Result.failure(Exception("کلید مدیر این محله روی این گوشی نیست"))
-            val res = postTo(BuildConfig.DIRECTORY_URL, JSONObject().put("action", "register").put("id", c.id).put("pub", c.adminPub)
+            val res = postTo(center.url, JSONObject().put("action", "register").put("id", c.id).put("pub", c.adminPub)
                 .put("name", c.name).put("ts", ts).put("sig", sig))
             if (!res.optBoolean("ok")) return@withContext Result.failure(Exception(res.optString("error", "register failed")))
-            prefs.upsertCommunity(c.copy(verified = true, local = false))
+            prefs.upsertCommunity(c.copy(verified = true, local = false, center = center.id))
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -73,15 +96,16 @@ class ServerApi(private val prefs: Prefs, private val repo: Repo) {
     }
 
     /**
-     * Confirm (or learn) the admin keys of all followed communities from the directory.
-     * No-op without connectivity. Returns the number of communities now verified.
+     * Confirm (or learn) the admin keys of all followed communities from their centers (or any center when
+     * the community's center is unknown). No-op without connectivity. Returns how many are verified now.
      */
     suspend fun verifyCommunities(): Int {
         var n = 0
         for (c in prefs.communities.value) {
-            if (c.verified) { n++; continue }
-            val entry = directoryLookup(c.id).getOrNull() ?: continue
+            if (c.verified || c.local) { if (c.verified) n++; continue }
+            val entry = (prefs.center(c.center)?.let { directoryLookup(it, c.id).getOrNull() } ?: lookupAnywhere(c.id).getOrNull()) ?: continue
             repo.adoptAdminKey(c.id, entry.name, entry.pub, verified = true)
+            prefs.community(c.id)?.let { cur -> if (cur.center.isBlank()) prefs.upsertCommunity(cur.copy(center = entry.center)) }
             if (prefs.community(c.id)?.verified == true) n++
         }
         return n
@@ -126,7 +150,6 @@ class ServerApi(private val prefs: Prefs, private val repo: Repo) {
                     if (repo.acceptRemote(b, "server")) received++
                 }
             }
-            // push what the server lacks (only its own community's content)
             var sent = 0
             val theirHave = serverHave.toMutableMap()
             rounds = 0
@@ -148,18 +171,17 @@ class ServerApi(private val prefs: Prefs, private val repo: Repo) {
         }
     }
 
-    /** Fetch the identity of a server before locking its address in. */
+    /** Fetch the identity of a community server before locking its address in. */
     suspend fun probeServer(url: String): Result<DirEntry> = withContext(Dispatchers.IO) {
         try {
             val res = get(url.trim())
             val c = res.optJSONObject("community") ?: return@withContext Result.failure(Exception("not a hamresan server"))
-            Result.success(DirEntry(c.optString("id"), c.optString("name"), c.optString("pub")))
+            Result.success(DirEntry(c.optString("id"), c.optString("name"), c.optString("pub"), ""))
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    /** The server says who it is; it must be a community we follow. Its key is adopted only if we have none yet. */
     private suspend fun adoptFromServer(c: JSONObject?): Exception? {
         if (c == null) return Exception("bad server reply")
         val id = c.optString("id"); val pub = c.optString("pub"); val name = c.optString("name")

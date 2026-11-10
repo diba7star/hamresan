@@ -1,4 +1,7 @@
 DirectoryIndex index.php
+<Files "config.php">
+  Require all denied
+</Files>
 <FilesMatch "\.(sqlite|sqlite-wal|sqlite-shm)$">
   Require all denied
 </FilesMatch>

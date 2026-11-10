@@ -25,6 +25,10 @@ $error = null;
 $id = strtolower(trim((string) ($_POST['id'] ?? '')));
 $name = mb_substr(trim((string) ($_POST['name'] ?? '')), 0, 60);
 $directory = trim((string) ($_POST['directory'] ?? DEFAULT_DIRECTORY));
+// Accept a bare center ID such as "hhi1.ir/hamresan-dir" (what the center installer prints).
+if ($directory !== '' && strpos($directory, '://') === false) $directory = 'https://' . $directory;
+$directory = rtrim($directory, '/');
+if (substr($directory, -10) !== '/index.php') $directory .= '/index.php';
 $seedIn = trim((string) ($_POST['seed'] ?? ''));
 
 function http_json(string $url, ?array $body = null): array {
@@ -139,7 +143,7 @@ code,.key{background:#f1f5f9;padding:6px 10px;border-radius:6px;direction:ltr;di
   <form method="post">
     <label>شناسه عمومی محله <span class="muted">(انگلیسی کوچک، عدد، خط تیره؛ مثلاً bandar-7)</span><input name="id" value="<?= $h($id) ?>" dir="ltr" required pattern="[a-z0-9][a-z0-9-]{2,30}"></label>
     <label>نام محله (فارسی)<input name="name" value="<?= $h($name) ?>" required></label>
-    <label>نشانی دایرکتوری مرکزی<input name="directory" value="<?= $h($directory) ?>" dir="ltr"></label>
+    <label>شناسه مرکز (فهرست محله‌ها) <span class="muted">— مثل hhi1.ir/hamresan-dir؛ پیش‌فرض مرکز عمومی پروژه است</span><input name="directory" value="<?= $h($directory) ?>" dir="ltr"></label>
     <label>کلید مدیر قبلی <span class="muted">(فقط برای انتقال سرور؛ در نصب تازه خالی بگذارید)</span><input name="seed" value="" dir="ltr" autocomplete="off"></label>
     <button>نصب و ثبت شناسه</button>
   </form>

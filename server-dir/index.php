@@ -61,7 +61,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         if (!$r) out(['ok' => false, 'error' => 'not_found'], 404);
         out(['ok' => true] + $r);
     }
-    out(['ok' => true, 'service' => 'hamresan-directory', 'version' => 1]);
+    // Root: identity of this center (the app shows the name after the user types the center ID).
+    $cfg = file_exists(__DIR__ . '/config.php') ? (require __DIR__ . '/config.php') : [];
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $path = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? '/'), '/\\');
+    $total = (int) db()->query('SELECT COUNT(*) FROM communities')->fetchColumn();
+    out(['ok' => true, 'service' => 'hamresan-directory', 'version' => 2,
+        'center' => ['id' => (string) ($cfg['center_id'] ?? ($host . $path)), 'name' => (string) ($cfg['center_name'] ?? ''), 'communities' => $total]]);
 }
 
 $req = json_decode((string) file_get_contents('php://input', false, null, 0, 16384), true);

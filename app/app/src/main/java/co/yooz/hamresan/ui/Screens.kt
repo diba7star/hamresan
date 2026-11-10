@@ -544,7 +544,7 @@ fun ExploreScreen(snack: SnackbarHostState, go: (Screen) -> Unit) {
         CommunityPicker(onJoined = { id ->
             app.mesh.commands.tryEmit(MeshState.Command.ResyncAll)
             scope.launch { snack.showSnackbar("محله «$id» اضافه شد") }
-        })
+        }, snack = snack)
         Spacer(Modifier.height(16.dp))
         HorizontalDivider()
         Spacer(Modifier.height(12.dp))
@@ -593,11 +593,49 @@ private fun NearbySection(go: (Screen) -> Unit) {
     Text("فهرست عمومی (نیاز به اینترنت)", fontWeight = FontWeight.Bold)
 }
 
+/** Centers row: which independent directories this phone knows, plus "add a center by ID". */
 @Composable
-fun CommunityPicker(onJoined: (String) -> Unit, modifier: Modifier = Modifier) {
+fun CentersBar(selected: String, onSelect: (String) -> Unit, snack: SnackbarHostState) {
+    val app = App.instance
+    val centers by app.prefs.centers.collectAsStateWithLifecycle()
+    var adding by rememberSaveable { mutableStateOf(false) }
+    var input by rememberSaveable { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (centers.size > 1) Chip("همه مرکزها", selected.isBlank()) { onSelect("") }
+        centers.forEach { c -> Chip(c.name.ifBlank { c.id }, selected == c.id) { onSelect(if (selected == c.id) "" else c.id) } }
+        Chip("+ افزودن مرکز", false) { adding = !adding }
+    }
+    if (adding) Card(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(12.dp)) {
+            Text("شناسه مرکز را از مدیر مرکز بگیرید؛ شکل آن مثل hhi1.ir/hamresan-dir است. مرکز = فهرست مستقل محله‌ها؛ هر گروه یا شهر می‌تواند مرکز خودش را داشته باشد (راهنمای ساخت مرکز در مستندات پروژه).",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 20.sp)
+            OutlinedTextField(value = input, onValueChange = { input = it }, label = { Text("شناسه مرکز") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                trailingIcon = {
+                    TextButton(enabled = !busy && input.isNotBlank(), onClick = {
+                        busy = true
+                        scope.launch {
+                            val r = app.server.probeCenter(input); busy = false
+                            r.fold({ info ->
+                                app.prefs.addCenter(Prefs.Center(info.id, info.name)); input = ""; adding = false; onSelect(info.id)
+                                snack.showSnackbar("مرکز «${info.name.ifBlank { info.id }}» اضافه شد (${info.communities.fa()} محله)")
+                            }, { snack.showSnackbar("مرکزی در این نشانی پیدا نشد (اینترنت و شناسه را بررسی کنید)") })
+                        }
+                    }) { Text(if (busy) "…" else "افزودن") }
+                })
+        }
+    }
+}
+
+@Composable
+fun CommunityPicker(onJoined: (String) -> Unit, modifier: Modifier = Modifier, snack: SnackbarHostState? = null) {
     val app = App.instance
     val followed by app.prefs.communities.collectAsStateWithLifecycle()
+    val centers by app.prefs.centers.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
+    var centerFilter by rememberSaveable { mutableStateOf("") }
     var items by remember { mutableStateOf<List<ServerApi.DirEntry>?>(null) }
     var offline by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf<String?>(null) }
@@ -605,14 +643,23 @@ fun CommunityPicker(onJoined: (String) -> Unit, modifier: Modifier = Modifier) {
     var error by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
+    val localSnack = snack ?: remember { SnackbarHostState() }
 
-    LaunchedEffect(query, attempt) {
-        var r = app.server.directoryList(query)
-        if (r.isFailure) { kotlinx.coroutines.delay(1500); r = app.server.directoryList(query) }
-        r.fold({ items = it; offline = false }, { items = emptyList(); offline = true })
+    LaunchedEffect(query, attempt, centers.size, centerFilter) {
+        items = null
+        val targets = if (centerFilter.isBlank()) centers else centers.filter { it.id == centerFilter }
+        val all = ArrayList<ServerApi.DirEntry>(); var reached = false
+        for (c in targets) {
+            var r = app.server.directoryList(c, query)
+            if (r.isFailure) { kotlinx.coroutines.delay(1200); r = app.server.directoryList(c, query) }
+            r.onSuccess { reached = true; all += it }
+        }
+        items = all; offline = !reached
     }
 
     Column(modifier) {
+        CentersBar(centerFilter, { centerFilter = it }, localSnack)
+        Spacer(Modifier.height(8.dp))
         OutlinedTextField(value = query, onValueChange = { query = it.take(40) }, label = { Text("جست‌وجوی محله یا نویسنده") },
             leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
@@ -620,7 +667,7 @@ fun CommunityPicker(onJoined: (String) -> Unit, modifier: Modifier = Modifier) {
         when {
             list == null -> Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             offline -> {
-                Text("فهرست عمومی به اینترنت نیاز دارد. بدون اینترنت از «محله‌های اطراف» استفاده کنید یا شناسه را دستی وارد کنید.",
+                Text("فهرست مرکزها به اینترنت نیاز دارد. بدون اینترنت از «محله‌های اطراف» استفاده کنید یا شناسه محله را دستی وارد کنید.",
                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedButton(onClick = { items = null; attempt++ }, modifier = Modifier.fillMaxWidth()) { Text("تلاش دوباره") }
                 OutlinedTextField(value = manual, onValueChange = { manual = it.lowercase().filter { ch -> ch.isLetterOrDigit() || ch == '-' }.take(31); error = null },
@@ -640,13 +687,13 @@ fun CommunityPicker(onJoined: (String) -> Unit, modifier: Modifier = Modifier) {
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(e.name.ifBlank { e.id }, fontWeight = FontWeight.Bold)
-                        Text(e.id, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(e.id + (if (centers.size > 1) "  ·  " + (centers.firstOrNull { it.id == e.center }?.name?.ifBlank { e.center } ?: e.center) else ""), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (already) Text("دنبال می‌کنید ✓", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     else Button(enabled = busy == null, onClick = {
                         busy = e.id
                         scope.launch {
-                            app.prefs.upsertCommunity(Prefs.Community(e.id, e.name, e.pub, verified = true))
+                            app.prefs.upsertCommunity(Prefs.Community(e.id, e.name, e.pub, verified = true, center = e.center))
                             app.repo.ensureSelfAuthor(); busy = null; onJoined(e.id)
                         }
                     }, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) { Text(if (busy == e.id) "…" else "دنبال کردن", fontSize = 12.sp) }
@@ -661,9 +708,9 @@ suspend fun joinCommunity(id: String): String? {
     val cid = id.trim().lowercase()
     if (!ID_RE.matches(cid)) return "شناسه نامعتبر است"
     if (app.prefs.community(cid) != null) return "این محله را قبلاً دنبال می‌کنید"
-    val r = app.server.directoryLookup(cid)
+    val r = app.server.lookupAnywhere(cid)
     return r.fold(
-        { entry -> if (entry == null) "این شناسه در فهرست ثبت نشده." else { app.prefs.upsertCommunity(Prefs.Community(entry.id, entry.name, entry.pub, verified = true)); null } },
+        { entry -> if (entry == null) "این شناسه در هیچ‌یک از مرکزهای شما ثبت نشده." else { app.prefs.upsertCommunity(Prefs.Community(entry.id, entry.name, entry.pub, verified = true, center = entry.center)); null } },
         { app.prefs.upsertCommunity(Prefs.Community(cid, "", "", verified = false)); null }
     )
 }
@@ -755,11 +802,14 @@ fun CommunityScreen(id: String, snack: SnackbarHostState, go: (Screen) -> Unit) 
                         if (mine && c?.verified == false) OutlinedButton(enabled = !busy, onClick = {
                             busy = true
                             scope.launch {
-                                val r = app.server.registerLocalCommunity(id); busy = false
-                                snack.showSnackbar(r.fold({ "محله در فهرست عمومی ثبت شد ✓" }, { "ثبت نشد: " + (if (it.message?.contains("taken") == true) "شناسه قبلاً گرفته شده" else "اینترنت در دسترس نیست") }))
+                                val center = app.prefs.primaryCenter
+                                val r = app.server.registerLocalCommunity(id, center); busy = false
+                                snack.showSnackbar(r.fold({ "محله در مرکز «${center.name.ifBlank { center.id }}» ثبت شد ✓" }, { "ثبت نشد: " + (if (it.message?.contains("taken") == true) "شناسه قبلاً گرفته شده" else "اینترنت در دسترس نیست") }))
                             }
-                        }, modifier = Modifier.weight(1f)) { Text(if (busy) "…" else "ثبت در فهرست عمومی") }
+                        }, modifier = Modifier.weight(1f)) { Text(if (busy) "…" else "ثبت در مرکز") }
                     }
+                    if (c != null && c.center.isNotBlank()) Text("مرکز: " + (app.prefs.center(c.center)?.name?.ifBlank { c.center } ?: c.center), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+                    else if (mine && c?.verified == false && app.prefs.centers.value.size > 1) Text("ثبت در مرکز اول فهرست شما انجام می‌شود: " + app.prefs.primaryCenter.name.ifBlank { app.prefs.primaryCenter.id }, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
                 }
             }
             items(posts, key = { it.id }) { p ->
@@ -891,6 +941,20 @@ fun ProfileScreen(snack: SnackbarHostState, go: (Screen) -> Unit) {
                 }
             }
             TextButton(onClick = { go(Screen.Explore) }) { Text("+ افزودن محله") }
+            HorizontalDivider()
+            val centers by prefs.centers.collectAsStateWithLifecycle()
+            Text("مرکزهای شما", fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+            centers.forEachIndexed { i, c ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(c.name.ifBlank { c.id } + if (i == 0) "  (اصلی)" else "", fontSize = 13.sp)
+                        Text(c.id, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (i > 0) TextButton(onClick = { prefs.setCenters(listOf(c) + centers.filter { it.id != c.id }) }) { Text("اصلی کن") }
+                    if (centers.size > 1) TextButton(onClick = { prefs.removeCenter(c.id) }) { Text("حذف") }
+                }
+            }
+            Text("مرکز جدید را در «کاوش ← افزودن مرکز» با شناسه‌اش اضافه کنید.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (communities.any { !it.verified && !it.local }) OutlinedButton(enabled = !busy, onClick = {
                 busy = true
                 scope.launch { val n = app.server.verifyCommunities(); busy = false; snack.showSnackbar("${n.fa()} از ${communities.size.fa()} محله تأیید شد") }

@@ -1,6 +1,6 @@
 # Hamresan — a neighbourhood social network that works without internet
 
-[فارسی](README.md) · [Self-hosting](docs/SELF-HOSTING.md) · [Build](docs/BUILD.md) · [Protocol & security](docs/PROTOCOL.md)
+[فارسی](README.md) · [Self-hosting](docs/SELF-HOSTING.md) · [Build](docs/BUILD.md) · [Your own center](docs/CENTER.md) · [Protocol & security](docs/PROTOCOL.md)
 
 **Hamresan** («همرسان») is an open-source Android app that spreads local blog posts from phone to phone over Bluetooth / Wi-Fi (Google Nearby Connections). No internet is required. Any phone that happens to be online acts as a courier and syncs with the community's server. Any admin can host their own community server on a plain PHP host, and every user can follow several communities. In places where nobody is online, a community can still be created offline and spread purely by proximity.
 
@@ -46,9 +46,9 @@ Host requirements: PHP 7.2+ with `pdo_sqlite`, `mbstring`, `curl`. The sodium ex
 | `designs/` | UI mockups |
 | `docs/` | Guides |
 
-## Running a completely independent network
+## Running a completely independent network (your own "center")
 
-Host `server-dir/` yourself, put its URL into `DIRECTORY_URL` in `app/app/build.gradle.kts`, build the app ([docs/BUILD.md](docs/BUILD.md)) and point `install.php` at your directory.
+Upload `hamresan-center.zip` to any PHP host and open `install.php`; you get a **center ID** such as `example.ir/hamresan-dir`. Users add it in the app under *Explore → Add center*; community admins enter it in their server installer. A phone can hold several centers at once. Details: [docs/CENTER.md](docs/CENTER.md).
 
 ## Limitations
 

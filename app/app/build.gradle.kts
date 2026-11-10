@@ -20,10 +20,10 @@ android {
         applicationId = "co.yooz.hamresan"
         minSdk = 24
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.3.0"
-        // Central directory: community ID -> admin public key. Holds no server addresses.
-        buildConfigField("String", "DIRECTORY_URL", "\"https://hhi1.ir/hamresan-dir/index.php\"")
+        versionCode = 5
+        versionName = "1.4.0"
+        // Default center (directory of communities), as a center ID "host/path". Users can add their own centers.
+        buildConfigField("String", "DEFAULT_CENTER", "\"hhi1.ir/hamresan-dir\"")
     }
 
     signingConfigs {
@@ -39,8 +39,8 @@ android {
 
     buildTypes {
         debug {
-            // local test directory (PHP built-in server on the host machine)
-            buildConfigField("String", "DIRECTORY_URL", "\"http://10.0.2.2:8090/index.php\"")
+            // local test center (PHP built-in server on the host machine)
+            buildConfigField("String", "DEFAULT_CENTER", "\"10.0.2.2:8090\"")
         }
         release {
             isMinifyEnabled = false
