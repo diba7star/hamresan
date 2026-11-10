@@ -440,7 +440,9 @@ fun InstaPost(p: PostView, communityName: String, snack: SnackbarHostState, go: 
             }
             Text("···", fontWeight = FontWeight.Black, modifier = Modifier.clickable { go(Screen.Post(p.id)) })
         }
-        Box(Modifier.fillMaxWidth().clickable { go(Screen.Post(p.id)) }) {
+        if (p.type == co.yooz.hamresan.data.TYPE_VPOST && p.image != null) {
+            VoiceBubble(p.id, p.image, p.title.toIntOrNull() ?: 0, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), big = true)
+        } else Box(Modifier.fillMaxWidth().clickable { go(Screen.Post(p.id)) }) {
             if (p.image != null) ImageBytes(p.image, Modifier.fillMaxWidth().heightIn(max = 420.dp), ContentScale.FillWidth, 0)
             else TextTile(p.title.ifBlank { p.body.take(120) }, p.id, Modifier.fillMaxWidth().aspectRatio(1.25f))
         }
@@ -455,8 +457,9 @@ fun InstaPost(p: PostView, communityName: String, snack: SnackbarHostState, go: 
         }
         Column(Modifier.padding(horizontal = 14.dp)) {
             if (p.likeCount > 0) Text("${p.likeCount.fa()} نفر پسندیدند", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            if (p.title.isNotBlank() || p.body.isNotBlank()) Text(
-                buildString { if (p.title.isNotBlank()) append(p.title); if (p.title.isNotBlank() && p.body.isNotBlank()) append(" — "); append(p.body) },
+            val isVoice = p.type == co.yooz.hamresan.data.TYPE_VPOST
+            if ((!isVoice && p.title.isNotBlank()) || p.body.isNotBlank()) Text(
+                buildString { if (!isVoice && p.title.isNotBlank()) append(p.title); if (!isVoice && p.title.isNotBlank() && p.body.isNotBlank()) append(" — "); append(p.body) },
                 fontSize = 13.5.sp, lineHeight = 22.sp, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp).clickable { go(Screen.Post(p.id)) }
             )
             if (p.commentCount > 0) Text("دیدن هر ${p.commentCount.fa()} دیدگاه", fontSize = 12.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp).clickable { go(Screen.Post(p.id)) })
@@ -470,10 +473,11 @@ private fun MagHero(p: PostView, communityName: String, go: (Screen) -> Unit) {
     Column(Modifier.fillMaxWidth().clickable { go(Screen.Post(p.id)) }.padding(18.dp, 12.dp)) {
         Text("$communityName · ویژه", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
         Spacer(Modifier.height(6.dp))
-        if (p.image != null) ImageBytes(p.image, Modifier.fillMaxWidth().heightIn(max = 220.dp), ContentScale.Crop, 4)
+        if (p.type == co.yooz.hamresan.data.TYPE_VPOST && p.image != null) VoiceBubble(p.id, p.image, p.title.toIntOrNull() ?: 0, modifier = Modifier.fillMaxWidth(), big = true)
+        else if (p.image != null) ImageBytes(p.image, Modifier.fillMaxWidth().heightIn(max = 220.dp), ContentScale.Crop, 4)
         else TextTile(p.title.ifBlank { p.body.take(100) }, p.id, Modifier.fillMaxWidth().height(170.dp), 18)
         Spacer(Modifier.height(10.dp))
-        if (p.title.isNotBlank()) Text(p.title, style = MaterialTheme.typography.headlineSmall)
+        if (p.type != co.yooz.hamresan.data.TYPE_VPOST && p.title.isNotBlank()) Text(p.title, style = MaterialTheme.typography.headlineSmall)
         if (p.body.isNotBlank()) Text(p.body, fontSize = 13.5.sp, lineHeight = 24.sp, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
         Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Avatar(p.authorName ?: "?", p.author, 22); Spacer(Modifier.width(6.dp))
@@ -488,7 +492,7 @@ private fun MagRow(p: PostView, communityName: String, go: (Screen) -> Unit) {
     Column(Modifier.padding(horizontal = 18.dp)) {
         Row(Modifier.fillMaxWidth().clickable { go(Screen.Post(p.id)) }.padding(vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(p.title.ifBlank { p.body.take(80) }, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(if (p.type == co.yooz.hamresan.data.TYPE_VPOST) "🎙 پیام صوتی · ${(p.title.toIntOrNull() ?: 0).fa()} ثانیه" + (if (p.body.isNotBlank()) " — " + p.body.take(60) else "") else p.title.ifBlank { p.body.take(80) }, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text("${p.authorName ?: ""} · $communityName · ${relativeTime(p.createdAt)} · ${p.commentCount.fa()} دیدگاه", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
             }
             Spacer(Modifier.width(12.dp))
@@ -502,12 +506,13 @@ private fun MagRow(p: PostView, communityName: String, go: (Screen) -> Unit) {
 @Composable
 private fun BrowserCard(p: PostView, communityName: String, go: (Screen) -> Unit) {
     Card(onClick = { go(Screen.Post(p.id)) }, modifier = Modifier.fillMaxWidth().padding(14.dp, 7.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(1.dp)) {
-        if (p.image != null) ImageBytes(p.image, Modifier.fillMaxWidth().heightIn(max = 200.dp), ContentScale.Crop, 0)
+        if (p.type == co.yooz.hamresan.data.TYPE_VPOST && p.image != null) VoiceBubble(p.id, p.image, p.title.toIntOrNull() ?: 0, modifier = Modifier.fillMaxWidth().padding(12.dp, 12.dp, 12.dp, 0.dp))
+        else if (p.image != null) ImageBytes(p.image, Modifier.fillMaxWidth().heightIn(max = 200.dp), ContentScale.Crop, 0)
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(brushFor(p.community ?: p.id)), contentAlignment = Alignment.Center) { Text((p.title.ifBlank { communityName }).take(1), color = Color.White, fontWeight = FontWeight.Black) }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(p.title.ifBlank { p.body.take(80) }, fontWeight = FontWeight.Bold, fontSize = 13.5.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(if (p.type == co.yooz.hamresan.data.TYPE_VPOST) "🎙 پیام صوتی" + (if (p.body.isNotBlank()) " — " + p.body.take(60) else "") else p.title.ifBlank { p.body.take(80) }, fontWeight = FontWeight.Bold, fontSize = 13.5.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text("‎hamresan://${p.community ?: "?"}/post/${p.id.take(4)}", fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Left, modifier = Modifier.fillMaxWidth(),
                     style = androidx.compose.ui.text.TextStyle(textDirection = androidx.compose.ui.text.style.TextDirection.Ltr))
                 Text("${p.authorName ?: ""} · ${relativeTime(p.createdAt)} · ${p.commentCount.fa()} دیدگاه · ${p.likeCount.fa()} پسند", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -604,7 +609,7 @@ fun CentersBar(selected: String, onSelect: (String) -> Unit, snack: SnackbarHost
     val scope = rememberCoroutineScope()
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         if (centers.size > 1) Chip("همه مرکزها", selected.isBlank()) { onSelect("") }
-        centers.forEach { c -> Chip(c.name.ifBlank { c.id }, selected == c.id) { onSelect(if (selected == c.id) "" else c.id) } }
+        centers.forEachIndexed { i, c -> Chip(c.name.ifBlank { "مرکز ${(i + 1).fa()}" }, selected == c.id) { onSelect(if (selected == c.id) "" else c.id) } }
         Chip("+ افزودن مرکز", false) { adding = !adding }
     }
     if (adding) Card(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
@@ -620,7 +625,7 @@ fun CentersBar(selected: String, onSelect: (String) -> Unit, snack: SnackbarHost
                             val r = app.server.probeCenter(input); busy = false
                             r.fold({ info ->
                                 app.prefs.addCenter(Prefs.Center(info.id, info.name)); input = ""; adding = false; onSelect(info.id)
-                                snack.showSnackbar("مرکز «${info.name.ifBlank { info.id }}» اضافه شد (${info.communities.fa()} محله)")
+                                snack.showSnackbar("مرکز «${info.name.ifBlank { "جدید" }}» اضافه شد (${info.communities.fa()} محله)")
                             }, { snack.showSnackbar("مرکزی در این نشانی پیدا نشد (اینترنت و شناسه را بررسی کنید)") })
                         }
                     }) { Text(if (busy) "…" else "افزودن") }
@@ -687,7 +692,7 @@ fun CommunityPicker(onJoined: (String) -> Unit, modifier: Modifier = Modifier, s
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(e.name.ifBlank { e.id }, fontWeight = FontWeight.Bold)
-                        Text(e.id + (if (centers.size > 1) "  ·  " + (centers.firstOrNull { it.id == e.center }?.name?.ifBlank { e.center } ?: e.center) else ""), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(e.id + (if (centers.size > 1) "  ·  " + (centers.firstOrNull { it.id == e.center }?.name?.ifBlank { "مرکز" } ?: "مرکز") else ""), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (already) Text("دنبال می‌کنید ✓", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     else Button(enabled = busy == null, onClick = {
@@ -804,17 +809,18 @@ fun CommunityScreen(id: String, snack: SnackbarHostState, go: (Screen) -> Unit) 
                             scope.launch {
                                 val center = app.prefs.primaryCenter
                                 val r = app.server.registerLocalCommunity(id, center); busy = false
-                                snack.showSnackbar(r.fold({ "محله در مرکز «${center.name.ifBlank { center.id }}» ثبت شد ✓" }, { "ثبت نشد: " + (if (it.message?.contains("taken") == true) "شناسه قبلاً گرفته شده" else "اینترنت در دسترس نیست") }))
+                                snack.showSnackbar(r.fold({ "محله در مرکز «${center.name.ifBlank { "اصلی" }}» ثبت شد ✓" }, { "ثبت نشد: " + (if (it.message?.contains("taken") == true) "شناسه قبلاً گرفته شده" else "اینترنت در دسترس نیست") }))
                             }
                         }, modifier = Modifier.weight(1f)) { Text(if (busy) "…" else "ثبت در مرکز") }
                     }
-                    if (c != null && c.center.isNotBlank()) Text("مرکز: " + (app.prefs.center(c.center)?.name?.ifBlank { c.center } ?: c.center), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
-                    else if (mine && c?.verified == false && app.prefs.centers.value.size > 1) Text("ثبت در مرکز اول فهرست شما انجام می‌شود: " + app.prefs.primaryCenter.name.ifBlank { app.prefs.primaryCenter.id }, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+                    if (c != null && c.center.isNotBlank()) Text("مرکز: " + (app.prefs.center(c.center)?.name?.ifBlank { "مرکز" } ?: "مرکز دیگر"), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+                    else if (mine && c?.verified == false && app.prefs.centers.value.size > 1) Text("ثبت در مرکز اصلی شما انجام می‌شود: " + app.prefs.primaryCenter.name.ifBlank { "مرکز اصلی" }, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
                 }
             }
             items(posts, key = { it.id }) { p ->
                 Box(Modifier.aspectRatio(1f).padding(1.dp).clickable { go(Screen.Post(p.id)) }) {
-                    if (p.image != null) ImageBytes(p.image, Modifier.fillMaxSize(), ContentScale.Crop, 0)
+                    if (p.type == co.yooz.hamresan.data.TYPE_VPOST) TextTile("🎙 ${(p.title.toIntOrNull() ?: 0).fa()} ثانیه", p.id, Modifier.fillMaxSize(), 12)
+                    else if (p.image != null) ImageBytes(p.image, Modifier.fillMaxSize(), ContentScale.Crop, 0)
                     else TextTile(p.title.ifBlank { p.body.take(40) }, p.id, Modifier.fillMaxSize(), 12)
                 }
             }
@@ -843,6 +849,7 @@ fun ActivityScreen(
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("همسایه‌ها", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Section("بی‌سیم زنده") { PttButton() }
         Section("شبکه محلی") {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -947,8 +954,8 @@ fun ProfileScreen(snack: SnackbarHostState, go: (Screen) -> Unit) {
             centers.forEachIndexed { i, c ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(c.name.ifBlank { c.id } + if (i == 0) "  (اصلی)" else "", fontSize = 13.sp)
-                        Text(c.id, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(c.name.ifBlank { "مرکز ${(i + 1).fa()}" } + if (i == 0) "  (اصلی)" else "", fontSize = 13.sp)
+                        Text("نشانی مرکز پنهان است", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (i > 0) TextButton(onClick = { prefs.setCenters(listOf(c) + centers.filter { it.id != c.id }) }) { Text("اصلی کن") }
                     if (centers.size > 1) TextButton(onClick = { prefs.removeCenter(c.id) }) { Text("حذف") }
@@ -1112,7 +1119,8 @@ fun BookmarksScreen(onBack: () -> Unit, go: (Screen) -> Unit) {
         LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.fillMaxSize()) {
             items(posts, key = { it.id }) { p ->
                 Box(Modifier.aspectRatio(1f).padding(1.dp).clickable { go(Screen.Post(p.id)) }) {
-                    if (p.image != null) ImageBytes(p.image, Modifier.fillMaxSize(), ContentScale.Crop, 0)
+                    if (p.type == co.yooz.hamresan.data.TYPE_VPOST) TextTile("🎙 ${(p.title.toIntOrNull() ?: 0).fa()} ثانیه", p.id, Modifier.fillMaxSize(), 12)
+                    else if (p.image != null) ImageBytes(p.image, Modifier.fillMaxSize(), ContentScale.Crop, 0)
                     else TextTile(p.title.ifBlank { p.body.take(40) }, p.id, Modifier.fillMaxSize(), 12)
                 }
             }
@@ -1164,13 +1172,15 @@ fun PostScreen(id: String, snack: SnackbarHostState, onBack: () -> Unit, go: (Sc
                             modifier = Modifier.clickable { p.community?.let { go(Screen.Community(it)) } })
                     }
                 }
-                p.image?.let { ImageBytes(it, Modifier.fillMaxWidth().heightIn(max = 420.dp), ContentScale.FillWidth, 0) }
+                val isVoice = p.type == co.yooz.hamresan.data.TYPE_VPOST
+                if (isVoice && p.image != null) VoiceBubble(p.id, p.image, p.title.toIntOrNull() ?: 0, modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp), big = true)
+                else p.image?.let { ImageBytes(it, Modifier.fillMaxWidth().heightIn(max = 420.dp), ContentScale.FillWidth, 0) }
                 Row(Modifier.padding(8.dp, 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { scope.launch { app.repo.like(p.id) } }) { Icon(if (p.likedByMe > 0) Icons.Default.Favorite else Icons.Default.FavoriteBorder, "پسندیدن", tint = if (p.likedByMe > 0) palette.likeColor else MaterialTheme.colorScheme.onSurface) }
                     Text("${p.likeCount.fa()} پسند · ${p.commentCount.fa()} دیدگاه", fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
                 }
                 Column(Modifier.padding(16.dp, 4.dp)) {
-                    if (p.title.isNotBlank()) Text(p.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    if (!isVoice && p.title.isNotBlank()) Text(p.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     if (p.body.isNotBlank()) Text(p.body, style = MaterialTheme.typography.bodyLarge, lineHeight = 28.sp, modifier = Modifier.padding(top = 8.dp))
                 }
                 HorizontalDivider(Modifier.padding(top = 10.dp))
@@ -1181,15 +1191,19 @@ fun PostScreen(id: String, snack: SnackbarHostState, onBack: () -> Unit, go: (Sc
                     Avatar(c.authorName ?: "?", c.author, 30); Spacer(Modifier.width(10.dp))
                     Column {
                         Row { Text(c.authorName ?: Crypto.shortId(c.author), fontWeight = FontWeight.Bold, fontSize = 13.sp); Spacer(Modifier.width(8.dp)); Text(relativeTime(c.createdAt), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        Text(c.body, fontSize = 13.5.sp, lineHeight = 22.sp, modifier = Modifier.padding(top = 2.dp))
+                        if (c.type == co.yooz.hamresan.data.TYPE_VCOMMENT && c.image != null) VoiceBubble(c.id, c.image, c.title.toIntOrNull() ?: 0, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                        else Text(c.body, fontSize = 13.5.sp, lineHeight = 22.sp, modifier = Modifier.padding(top = 2.dp))
                     }
                 }
             }
         }
         HorizontalDivider()
         Row(Modifier.padding(8.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Avatar(app.prefs.displayName(), app.prefs.pub, 32); Spacer(Modifier.width(8.dp))
-            OutlinedTextField(value = text, onValueChange = { text = it.take(1000) }, placeholder = { Text("دیدگاه شما…") }, modifier = Modifier.weight(1f), maxLines = 4, shape = CircleShape)
+            HoldToRecord(onRecorded = { bytes, secs ->
+                scope.launch { app.repo.createVoiceComment(id, bytes, secs).fold({ snack.showSnackbar("پیام صوتی فرستاده شد") }, { snack.showSnackbar("ارسال نشد") }) }
+            }, compact = true)
+            Spacer(Modifier.width(6.dp))
+            OutlinedTextField(value = text, onValueChange = { text = it.take(1000) }, placeholder = { Text("دیدگاه… یا میکروفون را نگه دارید") }, modifier = Modifier.weight(1f), maxLines = 4, shape = CircleShape)
             IconButton(enabled = text.isNotBlank(), onClick = {
                 val t = text; text = ""
                 scope.launch { app.repo.createComment(id, t).onFailure { snack.showSnackbar("ثبت دیدگاه نشد") } }
@@ -1217,14 +1231,29 @@ fun NewPostScreen(snack: SnackbarHostState, onBack: () -> Unit) {
         }
     }
     val wc = app.prefs.writerCommunity()
+    var voice by remember { mutableStateOf<Pair<ByteArray, Int>?>(null) }
     Column(Modifier.fillMaxSize()) {
         TopAppBar(title = { Text("مطلب تازه" + (wc?.let { " · ${it.name.ifBlank { it.id }}" } ?: "")) },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.Close, "بستن") } },
-            actions = { TextButton(enabled = !busy && (title.isNotBlank() || body.isNotBlank()), onClick = {
+            actions = { TextButton(enabled = !busy && (title.isNotBlank() || body.isNotBlank() || voice != null), onClick = {
                 busy = true
-                scope.launch { val r = app.repo.createPost(title, body, image); busy = false; r.fold({ onBack() }, { snack.showSnackbar("انتشار نشد: ${it.message}") }) }
+                scope.launch {
+                    val v = voice
+                    val r = if (v != null) app.repo.createVoicePost(v.first, v.second, listOf(title, body).filter { it.isNotBlank() }.joinToString(" — ")) else app.repo.createPost(title, body, image)
+                    busy = false; r.fold({ onBack() }, { snack.showSnackbar("انتشار نشد: ${it.message}") })
+                }
             }) { Text("انتشار", fontWeight = FontWeight.Bold) } })
         Column(Modifier.padding(16.dp).fillMaxSize().verticalScroll(rememberScrollState())) {
+            val v = voice
+            if (v != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    VoiceBubble("draft", v.first, v.second, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { VoicePlayer.stop(); voice = null }) { Icon(Icons.Default.Close, "حذف پیام صوتی") }
+                }
+            } else {
+                HoldToRecord(onRecorded = { b, s -> voice = b to s }, modifier = Modifier.fillMaxWidth())
+                Text("پیام صوتی تا ۶۰ ثانیه؛ به‌جای عکس می‌رود و مثل مطالب دیگر پخش می‌شود.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp))
+            }
             val img = image
             if (img != null) {
                 Box {

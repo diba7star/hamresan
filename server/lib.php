@@ -110,7 +110,7 @@ function accept_bundle(array $bundle): bool {
         $raw = base64_decode($img, true);
         if ($raw === false || strlen($raw) > MAX_IMAGE_BYTES) return false;
         if (hash('sha256', $raw) !== $ih) return false;
-    } elseif ($ih !== '' && $i['t'] === 'post' && (int) $i['e'] > now_ms()) {
+    } elseif ($ih !== '' && ($i['t'] === 'post' || $i['t'] === 'vpost') && (int) $i['e'] > now_ms()) {
         return false;
     }
     if (!verify_sig($i['a'], item_canonical($i), $i['sig'])) return false;
@@ -122,7 +122,10 @@ function accept_bundle(array $bundle): bool {
     $existingCert = $existing && $existing['cert'] ? json_decode($existing['cert'], true) : null;
     $incomingCert = (is_array($a) && isset($a['cert']) && is_array($a['cert']) && ($a['cert']['pub'] ?? '') === $i['a']) ? $a['cert'] : null;
 
-    if ($i['t'] === 'post') {
+    // item kinds: post / vpost (voice post) need a writer cert; comment / vcomment (voice) / like are open
+    $isPost = ($i['t'] === 'post' || $i['t'] === 'vpost');
+    $isReply = ($i['t'] === 'comment' || $i['t'] === 'vcomment' || $i['t'] === 'like');
+    if ($isPost) {
         $cert = null;
         if ($incomingCert && cert_valid_at($incomingCert, (int) $i['c'])) $cert = $incomingCert;
         elseif ($existingCert && cert_valid_at($existingCert, (int) $i['c'])) $cert = $existingCert;
@@ -130,10 +133,16 @@ function accept_bundle(array $bundle): bool {
         if (!$existingCert || (int) $cert['exp'] > (int) $existingCert['exp']) {
             upsert_author($i['a'], $cert['name'], json_encode($cert, JSON_UNESCAPED_UNICODE));
         }
-    } elseif ($i['t'] === 'comment') {
+    } elseif ($isReply) {
         $st = $pdo->prepare('SELECT 1 FROM items WHERE id = ?');
         $st->execute([$i['p'] ?? '']);
         if (!$st->fetchColumn()) return false;
+        if ($i['t'] === 'like') {
+            if (($i['b'] ?? '') !== '') return false;
+            $st = $pdo->prepare("SELECT 1 FROM items WHERE type = 'like' AND author = ? AND parentId = ?");
+            $st->execute([$i['a'], $i['p'] ?? '']);
+            if ($st->fetchColumn()) return false;
+        }
         if (!$existing) {
             $validIncoming = $incomingCert && cert_valid_at($incomingCert, now_ms()) ? $incomingCert : null;
             $name = $validIncoming ? $validIncoming['name'] : (mb_substr((string) ($a['name'] ?? ''), 0, 40) ?: substr(hash('sha256', base64_decode($i['a'])), 0, 8));

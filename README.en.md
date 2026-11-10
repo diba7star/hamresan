@@ -32,6 +32,11 @@ Three built-in, offline-switchable looks: **Stories** (default, Instagram-like),
 
 Host requirements: PHP 7.2+ with `pdo_sqlite`, `mbstring`, `curl`. The sodium extension is optional (a pure-PHP fallback is bundled in `vendor/`). Details: [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md).
 
+## Voice
+
+- **Voice notes:** writers can publish a voice post (up to 60 s) instead of a photo; anyone can leave a voice reply under a post (hold the mic next to the comment box). Notes are small AAC files (~15 KB per 10 s), signed and gossiped like any item.
+- **Live walkie-talkie:** on the *Neighbours* tab, hold the big button to talk live to every connected neighbour (30–80 m). One hop, no internet.
+
 ## Fully offline communities
 
 *Explore → Create community*: the admin key is generated on the phone and the ID is derived from it (e.g. `l-93df06d242`), so it is unique without any directory. Neighbours see it under *nearby communities*. Whenever the admin gets online, *Register in public list* publishes the same ID.

@@ -7,6 +7,8 @@
   `item\n{type}\n{id}\n{author}\n{seq}\n{parentId}\n{title}\n{body}\n{sha256(image)}\n{createdAt}\n{expiresAt}`.
 - Each author has one monotonically increasing `seq` across all their items. A peer's *have-vector* is `{authorPub: maxSeq}`; sync sends every item with a higher `seq`.
 - A **writer certificate** is `cert\n{pub}\n{name}\n{exp}` signed by the community admin key. Posts are accepted only if their author holds a valid certificate of a community the receiver follows; comments and likes are accepted from anyone (one like per author per post).
+- Item types: `post`, `vpost` (voice post: AAC bytes in the image slot, duration seconds in `title`), `comment`, `vcomment` (voice reply), `like` (one per author per post, empty body). Posts and voice posts need a writer certificate; replies are open.
+- Live push-to-talk: a STREAM payload whose first 4 bytes are `PTT1`, then one length byte + sender name, then raw PCM 16 kHz mono 16-bit until the stream closes. Receivers play it straight to the speaker; it is not stored or relayed.
 - Expired posts stay as rows (images stripped) so have-vectors never develop gaps.
 
 ## Mesh (Nearby Connections, P2P_CLUSTER, service id `co.yooz.hamresan.mesh.v1`)

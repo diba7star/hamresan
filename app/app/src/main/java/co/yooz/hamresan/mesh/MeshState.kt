@@ -44,7 +44,17 @@ class MeshState {
     sealed class Command {
         data class GrantWriter(val endpointId: String) : Command()
         object ResyncAll : Command()
+        object PttStart : Command()
+        object PttStop : Command()
     }
+
+    /** Live push-to-talk state. */
+    private val _pttTalking = MutableStateFlow(false)
+    val pttTalking: StateFlow<Boolean> = _pttTalking
+    fun setTalking(v: Boolean) { _pttTalking.value = v }
+    private val _pttIncoming = MutableStateFlow<String?>(null)   // name of the neighbour we are hearing
+    val pttIncoming: StateFlow<String?> = _pttIncoming
+    fun setIncoming(v: String?) { _pttIncoming.value = v }
 
     private val fmt = SimpleDateFormat("HH:mm:ss", Locale.US)
 

@@ -103,6 +103,8 @@ class MeshService : Service() {
                 when (cmd) {
                     is MeshState.Command.GrantWriter -> grantWriter(cmd.endpointId)
                     MeshState.Command.ResyncAll -> state.peers.value.keys.forEach { sendHello(it) }
+                    MeshState.Command.PttStart -> startPtt()
+                    MeshState.Command.PttStop -> stopPtt()
                 }
             }
         }
@@ -131,6 +133,7 @@ class MeshService : Service() {
     }
 
     override fun onDestroy() {
+        stopPtt()
         state.log("سرویس شبکه محلی متوقف شد")
         stopRadios()
         client.stopAllEndpoints()
@@ -215,7 +218,12 @@ class MeshService : Service() {
                     val input = payload.asStream()?.asInputStream() ?: return
                     scope.launch {
                         try {
+                            // First 4 bytes tell live voice ("PTT1") apart from a JSON message.
+                            val head = ByteArray(4); var got = 0
+                            while (got < 4) { val n = input.read(head, got, 4 - got); if (n < 0) break; got += n }
+                            if (got == 4 && String(head) == PTT_MAGIC) { playLive(endpointId, input); return@launch }
                             val buf = ByteArrayOutputStream()
+                            buf.write(head, 0, got)
                             val tmp = ByteArray(16 * 1024)
                             while (true) {
                                 val n = input.read(tmp)
@@ -378,6 +386,90 @@ class MeshService : Service() {
         state.notices.tryEmit("${peer.name} نویسنده شد")
     }
 
+    // ---------------- live push-to-talk (one hop: every connected neighbour hears you) ----------------
+
+    @Volatile private var pttRecorder: android.media.AudioRecord? = null
+    private val pttPipes = Collections.synchronizedList(ArrayList<java.io.PipedOutputStream>())
+
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun startPtt() {
+        if (pttRecorder != null) return
+        val peers = state.peers.value.keys.toList()
+        if (peers.isEmpty()) { state.notices.tryEmit("همسایه‌ای متصل نیست"); return }
+        val minBuf = android.media.AudioRecord.getMinBufferSize(PTT_RATE, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT)
+        val rec = try {
+            android.media.AudioRecord(android.media.MediaRecorder.AudioSource.VOICE_COMMUNICATION, PTT_RATE,
+                android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuf, 8192))
+        } catch (e: Exception) { state.notices.tryEmit("میکروفون در دسترس نیست"); return }
+        if (rec.state != android.media.AudioRecord.STATE_INITIALIZED) { rec.release(); state.notices.tryEmit("میکروفون در دسترس نیست"); return }
+        val name = app.prefs.displayName().toByteArray().take(60).toByteArray()
+        val header = ByteArrayOutputStream().apply { write(PTT_MAGIC.toByteArray()); write(name.size); write(name) }.toByteArray()
+        pttPipes.clear()
+        for (id in peers) {
+            try {
+                val out = java.io.PipedOutputStream()
+                val inp = java.io.PipedInputStream(out, 64 * 1024)
+                out.write(header)
+                pttPipes.add(out)
+                client.sendPayload(id, Payload.fromStream(inp))
+            } catch (_: Exception) {}
+        }
+        pttRecorder = rec
+        rec.startRecording()
+        state.setTalking(true)
+        state.log("بی‌سیم: در حال صحبت با ${peers.size} همسایه")
+        Thread {
+            val buf = ByteArray(PTT_RATE / 50 * 2)   // 20 ms of PCM16
+            try {
+                while (pttRecorder === rec) {
+                    val n = rec.read(buf, 0, buf.size)
+                    if (n <= 0) continue
+                    val dead = ArrayList<java.io.PipedOutputStream>()
+                    synchronized(pttPipes) { for (p in pttPipes) try { p.write(buf, 0, n) } catch (_: Exception) { dead.add(p) } }
+                    pttPipes.removeAll(dead.toSet())
+                }
+            } catch (_: Exception) {}
+        }.start()
+    }
+
+    private fun stopPtt() {
+        val rec = pttRecorder ?: return
+        pttRecorder = null
+        try { rec.stop() } catch (_: Exception) {}
+        try { rec.release() } catch (_: Exception) {}
+        synchronized(pttPipes) { pttPipes.forEach { try { it.close() } catch (_: Exception) {} }; pttPipes.clear() }
+        state.setTalking(false)
+    }
+
+    /** Play a neighbour's live voice straight from the stream. */
+    private fun playLive(endpointId: String, input: java.io.InputStream) {
+        val nameLen = input.read().coerceAtLeast(0)
+        val nameBytes = ByteArray(nameLen); var got = 0
+        while (got < nameLen) { val n = input.read(nameBytes, got, nameLen - got); if (n < 0) break; got += n }
+        val who = String(nameBytes).ifBlank { state.peer(endpointId)?.name ?: "همسایه" }
+        val minBuf = android.media.AudioTrack.getMinBufferSize(PTT_RATE, android.media.AudioFormat.CHANNEL_OUT_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT)
+        val track = android.media.AudioTrack.Builder()
+            .setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            .setAudioFormat(android.media.AudioFormat.Builder().setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT).setSampleRate(PTT_RATE).setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO).build())
+            .setBufferSizeInBytes(maxOf(minBuf, 16384)).build()
+        state.setIncoming(who)
+        state.log("بی‌سیم: صدای $who")
+        try {
+            track.play()
+            val buf = ByteArray(4096)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                if (n > 0) track.write(buf, 0, n)
+            }
+        } catch (_: Exception) {
+        } finally {
+            try { track.stop() } catch (_: Exception) {}
+            track.release()
+            if (state.pttIncoming.value == who) state.setIncoming(null)
+        }
+    }
+
     // ---------------- notification ----------------
 
     private fun startForegroundCompat() {
@@ -419,6 +511,8 @@ class MeshService : Service() {
         private const val CHANNEL = "mesh"
         private const val NOTIF_ID = 1
         const val ACTION_STOP = "co.yooz.hamresan.STOP"
+        const val PTT_MAGIC = "PTT1"
+        const val PTT_RATE = 16000
 
         fun start(ctx: Context) {
             val i = Intent(ctx, MeshService::class.java)
